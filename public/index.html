@@ -1,3 +1,6 @@
+Here is the updated code. I have added a dropdown menu in the header with 5 popular Edge TTS voices and updated the JavaScript to send the selected voice to your backend.
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -44,7 +47,28 @@ body {
   color: #fff;
   font-size: clamp(1.1rem, 2.5vw, 1.4rem);
   font-weight: 600;
-  text-align: center;
+  /* Changed to Flex to accommodate voice selector */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Voice Selector Styling */
+.voice-select {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+  max-width: 120px;
+}
+
+.voice-select option {
+  color: #333;
+  background-color: #fff;
 }
 
 /* Messages area */
@@ -173,7 +197,17 @@ body {
 
 <body>
 <div class="chat-container">
-  <div class="chat-header">Voice Chat Bot</div>
+  <div class="chat-header">
+    <span>Voice Chat Bot</span>
+    <!-- Voice Selection Dropdown -->
+    <select id="voiceSelect" class="voice-select" aria-label="Select Voice">
+      <option value="en-US-AriaNeural">Aria (US)</option>
+      <option value="en-US-GuyNeural">Guy (US)</option>
+      <option value="en-US-JennyNeural">Jenny (US)</option>
+      <option value="en-GB-SoniaNeural">Sonia (UK)</option>
+      <option value="en-US-ChristopherNeural">Christopher</option>
+    </select>
+  </div>
 
   <div class="chat-messages" id="chatMessages">
     <div class="message bot-message">
@@ -211,6 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendButton = document.getElementById('sendButton');
   const chatMessages = document.getElementById('chatMessages');
   const loading = document.getElementById('loading');
+  const voiceSelect = document.getElementById('voiceSelect'); // Reference to voice selector
 
   function sendMessage() {
     const message = chatInput.value.trim();
@@ -226,10 +261,14 @@ document.addEventListener('DOMContentLoaded', () => {
     loading.style.display = 'flex';
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
+    // Send message AND selected voice
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ 
+        message: message,
+        voice: voiceSelect.value 
+      })
     })
     .then(res => res.json())
     .then(data => {
@@ -268,3 +307,4 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+```
