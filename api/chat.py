@@ -102,7 +102,7 @@ class handler(BaseHTTPRequestHandler):
 
             # Convert text to speech
             speech_response = client.audio.speech.create(
-                model="canopylabs/orpheus-v1-english",
+                model="playai-tts-1",
                 voice="troy",
                 input=response_text,
                 response_format="wav"
