@@ -1,34 +1,10 @@
-# api/chat.py
 import os
 import json
-import base64
 from groq import Groq
 from http.server import BaseHTTPRequestHandler
 
-# A simple in-memory store for conversation history.
-conversation_history = []
-
-def truncate_conversation(messages, max_tokens=7000):
-    """Truncates the conversation history to fit within the model's token limit."""
-    if not messages:
-        return messages
-    
-    system_prompt = messages[0]
-    other_messages = messages[1:]
-    
-    truncated_messages = [system_prompt]
-    total_length = len(system_prompt['content'])
-    
-    for msg in reversed(other_messages):
-        msg_length = len(msg['content'])
-        if total_length + msg_length < max_tokens:
-            truncated_messages.insert(1, msg)
-            total_length += msg_length
-        else:
-            break
-            
-    return truncated_messages
-
+# Note: We removed the global conversation_history. 
+# State must be managed by the Frontend or a Database.
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -39,74 +15,81 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        global conversation_history
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-
         try:
-            api_key = os.environ.get("GROQ_API_KEY")
-            if not api_key:
-                raise ValueError("GROQ_API_KEY environment variable not set.")
-            
-            client = Groq(api_key=api_key)
-
-            content_length = int(self.headers['Content-Length'])
+            # 1. Read Request Body
+            content_length = int(self.headers.get('Content-Length', 0))
             if content_length == 0:
-                raise ValueError("Request body is empty.")
+                self.send_error_response(400, "Request body is empty.")
+                return
 
             post_data = self.rfile.read(content_length)
             request_body = json.loads(post_data.decode('utf-8'))
-            user_message = request_body.get('message', '')
             
-            if not user_message:
-                raise ValueError("No 'message' field found in request.")
+            # 2. Get Messages from Frontend (Stateless approach)
+            # Expecting structure: { "messages": [ {"role": "user", "content": "hi"} ] }
+            messages = request_body.get('messages', [])
+            
+            if not messages:
+                # Fallback if user sends just a single string 'message'
+                user_msg = request_body.get('message')
+                if user_msg:
+                    messages = [{"role": "user", "content": user_msg}]
+                else:
+                    self.send_error_response(400, "No 'messages' provided.")
+                    return
 
-            # Add user message to history
-            conversation_history.append({"role": "user", "content": user_message})
+            # 3. Setup Groq Client
+            api_key = os.environ.get("GROQ_API_KEY")
+            if not api_key:
+                self.send_error_response(500, "Server misconfiguration: API Key missing.")
+                return
+            
+            client = Groq(api_key=api_key)
 
-            messages_for_api = [
-                {"role": "system", "content": "You are a helpful assistant. Respond in a conversational and friendly manner."}
-            ] + conversation_history
+            # 4. Prepare System Prompt
+            system_prompt = {
+                "role": "system", 
+                "content": "You are a helpful assistant. Respond in a conversational and friendly manner."
+            }
+            
+            # Combine system prompt with user history
+            # (Ensure system prompt is always first)
+            final_messages = [system_prompt] + messages
 
-            messages_for_api = truncate_conversation(messages_for_api)
-
-            # 1. Generate text response
+            # 5. Call Groq for Text
             chat_completion = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
-                messages=messages_for_api,
+                messages=final_messages,
                 temperature=0.7,
                 max_tokens=500,
             )
             response_text = chat_completion.choices[0].message.content
 
-            # Add bot's response to history
-            conversation_history.append({"role": "assistant", "content": response_text})
+            # NOTE: Groq does NOT support TTS (Audio generation) natively yet.
+            # If you need Audio, you must use OpenAI, ElevenLabs, or Deepgram here.
+            # Returning text only for now to prevent crash.
 
-            # 2. Convert text to speech using the correct model and parameters
-            speech_response = client.audio.speech.create(
-                model="playai-tts-1",
-                input=response_text,
-                response_format="wav"
-            )
-            
-            audio_base64 = base64.b64encode(speech_response.content).decode("utf-8")
+            # 6. Send Success Response
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
             
             response = {
                 "text": response_text,
-                "audio": audio_base64
+                "audio": None # Placeholder until you add a valid TTS provider
             }
             self.wfile.write(json.dumps(response).encode())
 
         except Exception as e:
             import traceback
-            print(f"An error occurred: {e}")
-            print("Full traceback:")
+            print(f"Server Error: {e}")
             traceback.print_exc()
-            
-            error_response = {
-                "error": str(e), 
-                "text": "Sorry, I had trouble processing that. Please check the server logs for details."
-            }
-            self.wfile.write(json.dumps(error_response).encode())
+            self.send_error_response(500, str(e))
+
+    def send_error_response(self, code, message):
+        self.send_response(code)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps({"error": message}).encode())
