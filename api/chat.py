@@ -6,34 +6,26 @@ from groq import Groq
 from http.server import BaseHTTPRequestHandler
 
 # A simple in-memory store for conversation history.
-# In a real app with multiple users, you'd use a database keyed by user ID.
 conversation_history = []
 
 def truncate_conversation(messages, max_tokens=7000):
-    """
-    Truncates the conversation history to fit within the model's token limit.
-    It keeps the system prompt and the most recent messages.
-    """
+    """Truncates the conversation history to fit within the model's token limit."""
     if not messages:
         return messages
     
-    # Always keep the system prompt
     system_prompt = messages[0]
     other_messages = messages[1:]
     
-    # Simple truncation: keep the last N messages
-    # This is a basic approach; more sophisticated methods exist.
     truncated_messages = [system_prompt]
     total_length = len(system_prompt['content'])
     
-    # Iterate from the end (most recent messages) to the beginning
     for msg in reversed(other_messages):
         msg_length = len(msg['content'])
         if total_length + msg_length < max_tokens:
-            truncated_messages.insert(1, msg) # Insert after system prompt
+            truncated_messages.insert(1, msg)
             total_length += msg_length
         else:
-            break # Stop if adding this message would exceed the limit
+            break
             
     return truncated_messages
 
@@ -54,6 +46,11 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
+            # --- DEBUGGING: Print raw headers and content length ---
+            print("--- New Request ---")
+            print(f"Headers: {self.headers}")
+            print(f"Content-Length: {self.headers.get('Content-Length')}")
+
             api_key = os.environ.get("GROQ_API_KEY")
             if not api_key:
                 raise ValueError("GROQ_API_KEY environment variable not set.")
@@ -61,23 +58,34 @@ class handler(BaseHTTPRequestHandler):
             client = Groq(api_key=api_key)
 
             content_length = int(self.headers['Content-Length'])
+            
+            # --- DEBUGGING: Handle cases where content might be empty ---
+            if content_length == 0:
+                raise ValueError("Request body is empty.")
+
             post_data = self.rfile.read(content_length)
+            
+            # --- DEBUGGING: Print the raw and parsed body ---
+            print(f"Raw post data: {post_data}")
+            
             request_body = json.loads(post_data.decode('utf-8'))
+            print(f"Parsed JSON body: {request_body}")
+            
             user_message = request_body.get('message', '')
+            print(f"Extracted user message: '{user_message}'")
             
             if not user_message:
-                raise ValueError("No message provided in request.")
+                raise ValueError("No 'message' field found in request.")
 
             # Add user message to history
             conversation_history.append({"role": "user", "content": user_message})
 
-            # Prepare the full message list for the API
             messages_for_api = [
                 {"role": "system", "content": "You are a helpful assistant. Respond in a conversational and friendly manner."}
             ] + conversation_history
 
-            # IMPORTANT: Truncate the history to prevent 400 errors
             messages_for_api = truncate_conversation(messages_for_api)
+            print(f"Messages being sent to Groq: {messages_for_api}")
 
             # Generate text response
             chat_completion = client.chat.completions.create(
@@ -108,11 +116,14 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
 
         except Exception as e:
-            # This will catch the 400 error from Groq and any other exceptions
-            print(f"An error occurred: {e}") # Check Vercel logs for this message
-            # Send a user-friendly error message back to the frontend
+            # --- DEBUGGING: Print the full exception ---
+            import traceback
+            print(f"An error occurred: {e}")
+            print("Full traceback:")
+            traceback.print_exc()
+            
             error_response = {
                 "error": str(e), 
-                "text": "Sorry, I had trouble processing that. Maybe the message was too long? Please try again."
+                "text": "Sorry, I had trouble processing that. Please check the server logs for details."
             }
             self.wfile.write(json.dumps(error_response).encode())
