@@ -6,6 +6,7 @@ import edge_tts
 from groq import Groq
 from http.server import BaseHTTPRequestHandler
 from duckduckgo_search import DDGS
+from datetime import datetime # Added to track current time
 
 # HELPER: Async function to generate audio using Edge-TTS
 async def generate_audio(text, voice):
@@ -16,17 +17,20 @@ async def generate_audio(text, voice):
             audio_data += chunk["data"]
     return audio_data
 
-# IMPROVED: Search function
+# SEARCH: Optimized to find current info
 def get_web_results(query):
-    print(f"Searching web for: {query}")
+    # Add "current" and "today" to the query to force newer results
+    search_query = f"{query} current weather temperature today" if "weather" in query.lower() else query
+    print(f"Searching web for: {search_query}")
+    
     try:
         results_text = ""
         with DDGS() as ddgs:
-            # We increased max_results to 5 to get a better chance of finding the data
-            results = list(ddgs.text(query, max_results=5))
+            # We look at more results to find the most recent one
+            results = list(ddgs.text(search_query, max_results=6))
             if results:
                 for r in results:
-                    results_text += f"- {r['body']}\n"
+                    results_text += f"- Source: {r['title']} | Info: {r['body']}\n"
                 return results_text
     except Exception as e:
         print(f"Search error: {e}")
@@ -43,17 +47,12 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self.send_error_response(400, "Request body is empty.")
-                return
-
             post_data = self.rfile.read(content_length)
             request_body = json.loads(post_data.decode('utf-8'))
             
             selected_voice = request_body.get('voice', 'en-US-AriaNeural')
             messages = request_body.get('messages', [])
             
-            user_msg_content = ""
             if not messages:
                 user_msg_content = request_body.get('message', "")
                 messages = [{"role": "user", "content": user_msg_content}]
@@ -63,30 +62,34 @@ class handler(BaseHTTPRequestHandler):
             api_key = os.environ.get("GROQ_API_KEY")
             client = Groq(api_key=api_key)
 
+            # Get current date/time to help the AI filter old search results
+            current_time = datetime.now().strftime("%A, %B %d, %Y")
+
             # 1. SEARCH THE WEB
             search_context = get_web_results(user_msg_content)
             
-            # 2. IMPROVED SYSTEM PROMPT
-            # We are now telling the AI it HAS access to the web via these results.
+            # 2. STRICT SYSTEM PROMPT
             system_content = (
-                "You are a helpful assistant with real-time web access. "
-                "Use the provided web search results to answer the user's question accurately. "
-                "If the search results contain the answer (like weather or news), state it clearly. "
-                "Keep your response very concise (1-2 sentences)."
+                f"Today's date is {current_time}. "
+                "You are a factual assistant with real-time web access. "
+                "Use the search results provided to give accurate, current information. "
+                "Ignore results that appear to be from past years or look like generic climate data. "
+                "If the search results mention a specific temperature for today, use that. "
+                "Keep your response to 1-2 sentences max."
             )
             
             if search_context:
-                system_content += f"\n\nCURRENT WEB SEARCH RESULTS:\n{search_context}"
+                system_content += f"\n\nWEB SEARCH RESULTS:\n{search_context}"
 
             system_prompt = {"role": "system", "content": system_content}
             final_messages = [system_prompt] + messages
 
-            # 3. Generate Text
+            # 3. Generate Text (Lower temperature = more factual)
             chat_completion = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=final_messages,
-                temperature=0.3, # Lowered temperature for more factual accuracy
-                max_tokens=200, 
+                temperature=0.1, 
+                max_tokens=150, 
             )
             response_text = chat_completion.choices[0].message.content
 
