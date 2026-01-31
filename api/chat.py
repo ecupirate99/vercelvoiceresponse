@@ -17,18 +17,24 @@ async def generate_audio(text, voice):
             audio_data += chunk["data"]
     return audio_data
 
-# SEARCH: Simpler search query yields better text snippets
+# SEARCH: Logic to get fresh data
 def get_web_results(query):
     print(f"Searching web for: {query}")
+    results_text = ""
     try:
-        results_text = ""
         with DDGS() as ddgs:
-            # We use the raw query. ddgs.text is best for general info.
-            results = list(ddgs.text(query, max_results=5))
+            # If asking for weather or news, use the News tab for much fresher data
+            if any(word in query.lower() for word in ["weather", "news", "price", "stock"]):
+                print("Using News Search for fresh data...")
+                results = list(ddgs.news(query, max_results=5))
+            else:
+                results = list(ddgs.text(query, max_results=5))
+            
             if results:
                 for r in results:
-                    # Combine title and body to give AI more context
-                    results_text += f"TITLE: {r['title']}\nCONTENT: {r['body']}\n\n"
+                    # News results use 'body', Text results use 'body' or 'snippet'
+                    content = r.get('body', r.get('snippet', ''))
+                    results_text += f"SOURCE: {r.get('title')}\nINFO: {content}\n\n"
                 return results_text
     except Exception as e:
         print(f"Search error: {e}")
@@ -50,42 +56,40 @@ class handler(BaseHTTPRequestHandler):
             
             selected_voice = request_body.get('voice', 'en-US-AriaNeural')
             messages = request_body.get('messages', [])
-            
-            if not messages:
-                user_msg_content = request_body.get('message', "")
-                messages = [{"role": "user", "content": user_msg_content}]
-            else:
-                user_msg_content = messages[-1]['content']
+            user_msg_content = messages[-1]['content'] if messages else request_body.get('message', "")
 
             api_key = os.environ.get("GROQ_API_KEY")
             client = Groq(api_key=api_key)
 
-            # Date tracking
-            current_time = datetime.now().strftime("%A, %B %d, %Y")
-
-            # 1. SEARCH THE WEB
+            # Current context
+            current_date = datetime.now().strftime("%A, %b %d, %Y")
+            
+            # 1. GET FRESH DATA
             search_context = get_web_results(user_msg_content)
             
-            # 2. FLEXIBLE SYSTEM PROMPT
+            # 2. STRICT SYSTEM PROMPT
             system_content = (
-                f"Today is {current_time}. You are a helpful assistant with real-time web access. "
-                "You will be provided with search results. Use them to answer the user's question. "
-                "If the search results contain specific details (like temperature or news), prioritize those. "
-                "If no specific data is found in the snippets, summarize the general information provided. "
-                "Keep your response to 1-2 sentences."
+                f"Today is {current_date}. You are a factual assistant. "
+                "You are provided with search results from the last few hours. "
+                "RULE 1: Only report numbers (like temperature) if they are explicitly in the search results. "
+                "RULE 2: If the results show multiple temperatures, pick the one from the most recent-looking source. "
+                "RULE 3: If you cannot find a specific current temperature, say 'The search results show [General Info] but don't state the exact current temperature.' "
+                "Keep response to 1-2 sentences."
             )
             
             if search_context:
-                system_content += f"\n\nDATA FROM WEB SEARCH:\n{search_context}"
+                system_content += f"\n\nFRESH SEARCH RESULTS:\n{search_context}"
 
             system_prompt = {"role": "system", "content": system_content}
-            final_messages = [system_prompt] + messages
+            
+            # Ensure we send the full message history if it exists
+            final_messages = [system_prompt] + (messages if messages else [{"role": "user", "content": user_msg_content}])
 
-            # 3. Generate Text (Temperature 0.2 is the 'Sweet Spot' for facts)
+            # 3. Generate Text
             chat_completion = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=final_messages,
-                temperature=0.2, 
+                temperature=0.0, # Zero temperature for absolute factual rigidity
                 max_tokens=150, 
             )
             response_text = chat_completion.choices[0].message.content
