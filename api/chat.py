@@ -84,9 +84,9 @@ class handler(BaseHTTPRequestHandler):
             # Add bot's response to history
             conversation_history.append({"role": "assistant", "content": response_text})
 
-            # 2. Convert text to speech using a stable model
+            # 2. Convert text to speech using the correct model and parameters
             speech_response = client.audio.speech.create(
-                model="whisper-large-v3-turbo",
+                model="playai-tts-1",
                 input=response_text,
                 response_format="wav"
             )
@@ -109,5 +109,4 @@ class handler(BaseHTTPRequestHandler):
                 "error": str(e), 
                 "text": "Sorry, I had trouble processing that. Please check the server logs for details."
             }
-            self.wfile.write(json.dumps(error_response).encode())       
-      
+            self.wfile.write(json.dumps(error_response).encode())
