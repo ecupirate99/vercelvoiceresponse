@@ -1,10 +1,22 @@
 import os
 import json
+import base64
+import asyncio
+import edge_tts
 from groq import Groq
 from http.server import BaseHTTPRequestHandler
 
-# Note: We removed the global conversation_history. 
-# State must be managed by the Frontend or a Database.
+# HELPER: Async function to generate audio using Edge-TTS
+async def generate_audio(text):
+    # Voices: "en-US-AriaNeural" (Female), "en-US-GuyNeural" (Male), "en-GB-SoniaNeural" (British), etc.
+    communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
+    audio_data = b""
+    
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+            
+    return audio_data
 
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -16,7 +28,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            # 1. Read Request Body
+            # 1. Validation & Setup
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length == 0:
                 self.send_error_response(400, "Request body is empty.")
@@ -25,12 +37,11 @@ class handler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
             request_body = json.loads(post_data.decode('utf-8'))
             
-            # 2. Get Messages from Frontend (Stateless approach)
-            # Expecting structure: { "messages": [ {"role": "user", "content": "hi"} ] }
+            # Get messages from frontend
             messages = request_body.get('messages', [])
             
+            # Fallback for simple testing
             if not messages:
-                # Fallback if user sends just a single string 'message'
                 user_msg = request_body.get('message')
                 if user_msg:
                     messages = [{"role": "user", "content": user_msg}]
@@ -38,38 +49,41 @@ class handler(BaseHTTPRequestHandler):
                     self.send_error_response(400, "No 'messages' provided.")
                     return
 
-            # 3. Setup Groq Client
             api_key = os.environ.get("GROQ_API_KEY")
             if not api_key:
-                self.send_error_response(500, "Server misconfiguration: API Key missing.")
+                self.send_error_response(500, "GROQ_API_KEY missing.")
                 return
             
             client = Groq(api_key=api_key)
 
-            # 4. Prepare System Prompt
+            # 2. STRICT System Prompt for Conciseness
+            # We explicitly tell it to be short.
             system_prompt = {
                 "role": "system", 
-                "content": "You are a helpful assistant. Respond in a conversational and friendly manner."
+                "content": "You are a helpful assistant. Keep your answers very concise, short, and to the point. Limit responses to 1-2 sentences unless asked for more details."
             }
             
-            # Combine system prompt with user history
-            # (Ensure system prompt is always first)
             final_messages = [system_prompt] + messages
 
-            # 5. Call Groq for Text
+            # 3. Generate Text (Llama 3)
             chat_completion = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=final_messages,
                 temperature=0.7,
-                max_tokens=500,
+                max_tokens=150, # Hard limit on tokens to prevent long rants
             )
             response_text = chat_completion.choices[0].message.content
 
-            # NOTE: Groq does NOT support TTS (Audio generation) natively yet.
-            # If you need Audio, you must use OpenAI, ElevenLabs, or Deepgram here.
-            # Returning text only for now to prevent crash.
+            # 4. Generate Audio (Edge TTS)
+            # We use asyncio.run because do_POST is synchronous, but edge-tts is async
+            try:
+                audio_bytes = asyncio.run(generate_audio(response_text))
+                audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+            except Exception as e:
+                print(f"Audio generation failed: {e}")
+                audio_base64 = None
 
-            # 6. Send Success Response
+            # 5. Send Response
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -77,13 +91,12 @@ class handler(BaseHTTPRequestHandler):
             
             response = {
                 "text": response_text,
-                "audio": None # Placeholder until you add a valid TTS provider
+                "audio": audio_base64 
             }
             self.wfile.write(json.dumps(response).encode())
 
         except Exception as e:
             import traceback
-            print(f"Server Error: {e}")
             traceback.print_exc()
             self.send_error_response(500, str(e))
 
