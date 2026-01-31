@@ -6,6 +6,7 @@ from groq import Groq
 from http.server import BaseHTTPRequestHandler
 
 # A simple in-memory store for conversation history.
+# In a real app with multiple users, you'd use a database keyed by user ID.
 conversation_history = []
 
 def truncate_conversation(messages, max_tokens=7000):
@@ -89,7 +90,7 @@ class handler(BaseHTTPRequestHandler):
 
             # Generate text response
             chat_completion = client.chat.completions.create(
-                model="llama3-8b-8192", 
+                model="llama-3.1-8b-instant",  # <--- THIS IS THE CORRECTED MODEL NAME
                 messages=messages_for_api,
                 temperature=0.7,
                 max_tokens=500,
