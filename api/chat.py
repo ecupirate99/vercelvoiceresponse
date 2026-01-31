@@ -7,9 +7,10 @@ from groq import Groq
 from http.server import BaseHTTPRequestHandler
 
 # HELPER: Async function to generate audio using Edge-TTS
-async def generate_audio(text):
-    # Voices: "en-US-AriaNeural" (Female), "en-US-GuyNeural" (Male), "en-GB-SoniaNeural" (British), etc.
-    communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
+# CHANGED: Added 'voice' parameter here
+async def generate_audio(text, voice):
+    # Use the voice passed from the function call
+    communicate = edge_tts.Communicate(text, voice)
     audio_data = b""
     
     async for chunk in communicate.stream():
@@ -40,6 +41,10 @@ class handler(BaseHTTPRequestHandler):
             # Get messages from frontend
             messages = request_body.get('messages', [])
             
+            # CHANGED: Extract the selected voice from the frontend
+            # Defaults to Aria if nothing is selected
+            selected_voice = request_body.get('voice', 'en-US-AriaNeural')
+
             # Fallback for simple testing
             if not messages:
                 user_msg = request_body.get('message')
@@ -57,7 +62,6 @@ class handler(BaseHTTPRequestHandler):
             client = Groq(api_key=api_key)
 
             # 2. STRICT System Prompt for Conciseness
-            # We explicitly tell it to be short.
             system_prompt = {
                 "role": "system", 
                 "content": "You are a helpful assistant. Keep your answers very concise, short, and to the point. Limit responses to 1-2 sentences unless asked for more details."
@@ -70,14 +74,14 @@ class handler(BaseHTTPRequestHandler):
                 model="llama-3.1-8b-instant",
                 messages=final_messages,
                 temperature=0.7,
-                max_tokens=150, # Hard limit on tokens to prevent long rants
+                max_tokens=150,
             )
             response_text = chat_completion.choices[0].message.content
 
             # 4. Generate Audio (Edge TTS)
-            # We use asyncio.run because do_POST is synchronous, but edge-tts is async
             try:
-                audio_bytes = asyncio.run(generate_audio(response_text))
+                # CHANGED: Pass the 'selected_voice' variable to the function
+                audio_bytes = asyncio.run(generate_audio(response_text, selected_voice))
                 audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
             except Exception as e:
                 print(f"Audio generation failed: {e}")
