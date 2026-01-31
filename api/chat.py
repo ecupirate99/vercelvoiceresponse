@@ -6,7 +6,6 @@ from groq import Groq
 from http.server import BaseHTTPRequestHandler
 
 # A simple in-memory store for conversation history.
-# In a real app with multiple users, you'd use a database keyed by user ID.
 conversation_history = []
 
 def truncate_conversation(messages, max_tokens=7000):
@@ -47,11 +46,6 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            # --- DEBUGGING: Print raw headers and content length ---
-            print("--- New Request ---")
-            print(f"Headers: {self.headers}")
-            print(f"Content-Length: {self.headers.get('Content-Length')}")
-
             api_key = os.environ.get("GROQ_API_KEY")
             if not api_key:
                 raise ValueError("GROQ_API_KEY environment variable not set.")
@@ -59,21 +53,12 @@ class handler(BaseHTTPRequestHandler):
             client = Groq(api_key=api_key)
 
             content_length = int(self.headers['Content-Length'])
-            
-            # --- DEBUGGING: Handle cases where content might be empty ---
             if content_length == 0:
                 raise ValueError("Request body is empty.")
 
             post_data = self.rfile.read(content_length)
-            
-            # --- DEBUGGING: Print the raw and parsed body ---
-            print(f"Raw post data: {post_data}")
-            
             request_body = json.loads(post_data.decode('utf-8'))
-            print(f"Parsed JSON body: {request_body}")
-            
             user_message = request_body.get('message', '')
-            print(f"Extracted user message: '{user_message}'")
             
             if not user_message:
                 raise ValueError("No 'message' field found in request.")
@@ -86,11 +71,10 @@ class handler(BaseHTTPRequestHandler):
             ] + conversation_history
 
             messages_for_api = truncate_conversation(messages_for_api)
-            print(f"Messages being sent to Groq: {messages_for_api}")
 
-            # Generate text response
+            # 1. Generate text response
             chat_completion = client.chat.completions.create(
-                model="llama-3.1-8b-instant",  # <--- THIS IS THE CORRECTED MODEL NAME
+                model="llama-3.1-8b-instant",
                 messages=messages_for_api,
                 temperature=0.7,
                 max_tokens=500,
@@ -100,10 +84,9 @@ class handler(BaseHTTPRequestHandler):
             # Add bot's response to history
             conversation_history.append({"role": "assistant", "content": response_text})
 
-            # Convert text to speech
+            # 2. Convert text to speech using a stable model
             speech_response = client.audio.speech.create(
-                model="playai-tts-1",
-                voice="troy",
+                model="whisper-large-v3-turbo",
                 input=response_text,
                 response_format="wav"
             )
@@ -117,7 +100,6 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
 
         except Exception as e:
-            # --- DEBUGGING: Print the full exception ---
             import traceback
             print(f"An error occurred: {e}")
             print("Full traceback:")
@@ -127,4 +109,5 @@ class handler(BaseHTTPRequestHandler):
                 "error": str(e), 
                 "text": "Sorry, I had trouble processing that. Please check the server logs for details."
             }
-            self.wfile.write(json.dumps(error_response).encode())
+            self.wfile.write(json.dumps(error_response).encode())       
+      
