@@ -6,7 +6,7 @@ import edge_tts
 from groq import Groq
 from http.server import BaseHTTPRequestHandler
 from duckduckgo_search import DDGS
-from datetime import datetime # Added to track current time
+from datetime import datetime
 
 # HELPER: Async function to generate audio using Edge-TTS
 async def generate_audio(text, voice):
@@ -17,20 +17,18 @@ async def generate_audio(text, voice):
             audio_data += chunk["data"]
     return audio_data
 
-# SEARCH: Optimized to find current info
+# SEARCH: Simpler search query yields better text snippets
 def get_web_results(query):
-    # Add "current" and "today" to the query to force newer results
-    search_query = f"{query} current weather temperature today" if "weather" in query.lower() else query
-    print(f"Searching web for: {search_query}")
-    
+    print(f"Searching web for: {query}")
     try:
         results_text = ""
         with DDGS() as ddgs:
-            # We look at more results to find the most recent one
-            results = list(ddgs.text(search_query, max_results=6))
+            # We use the raw query. ddgs.text is best for general info.
+            results = list(ddgs.text(query, max_results=5))
             if results:
                 for r in results:
-                    results_text += f"- Source: {r['title']} | Info: {r['body']}\n"
+                    # Combine title and body to give AI more context
+                    results_text += f"TITLE: {r['title']}\nCONTENT: {r['body']}\n\n"
                 return results_text
     except Exception as e:
         print(f"Search error: {e}")
@@ -62,33 +60,32 @@ class handler(BaseHTTPRequestHandler):
             api_key = os.environ.get("GROQ_API_KEY")
             client = Groq(api_key=api_key)
 
-            # Get current date/time to help the AI filter old search results
+            # Date tracking
             current_time = datetime.now().strftime("%A, %B %d, %Y")
 
             # 1. SEARCH THE WEB
             search_context = get_web_results(user_msg_content)
             
-            # 2. STRICT SYSTEM PROMPT
+            # 2. FLEXIBLE SYSTEM PROMPT
             system_content = (
-                f"Today's date is {current_time}. "
-                "You are a factual assistant with real-time web access. "
-                "Use the search results provided to give accurate, current information. "
-                "Ignore results that appear to be from past years or look like generic climate data. "
-                "If the search results mention a specific temperature for today, use that. "
-                "Keep your response to 1-2 sentences max."
+                f"Today is {current_time}. You are a helpful assistant with real-time web access. "
+                "You will be provided with search results. Use them to answer the user's question. "
+                "If the search results contain specific details (like temperature or news), prioritize those. "
+                "If no specific data is found in the snippets, summarize the general information provided. "
+                "Keep your response to 1-2 sentences."
             )
             
             if search_context:
-                system_content += f"\n\nWEB SEARCH RESULTS:\n{search_context}"
+                system_content += f"\n\nDATA FROM WEB SEARCH:\n{search_context}"
 
             system_prompt = {"role": "system", "content": system_content}
             final_messages = [system_prompt] + messages
 
-            # 3. Generate Text (Lower temperature = more factual)
+            # 3. Generate Text (Temperature 0.2 is the 'Sweet Spot' for facts)
             chat_completion = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=final_messages,
-                temperature=0.1, 
+                temperature=0.2, 
                 max_tokens=150, 
             )
             response_text = chat_completion.choices[0].message.content
