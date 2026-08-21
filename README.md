@@ -10,7 +10,7 @@ The bot allows users to talk or type messages, utilizes a web search integration
 
 - **Microphone Integration (Speech-to-Text)**: An interactive, pulsing mic button near the chat input allows users to dictate messages. Once speech ends, it auto-transcribes and submits.
 - **Edge TTS Integration (Text-to-Speech)**: Converts the LLM's response into high-quality neural voice audio dynamically, with a voice dropdown selector (Aria, Guy, Jenny, Sonia, Christopher).
-- **LLM + Web Search Context**: Integrates with DuckDuckGo Search to fetch fresh factual data for queries (like current weather, news, or stats) and formats the context into a prompt for Groq (`llama-3.1-8b-instant`).
+- **LLM + Web Search Context**: Integrates with DuckDuckGo Search to fetch fresh factual data for queries (like current weather, news, or stats) and formats the context into a prompt for Groq (`openai/gpt-oss-20b`). This model may experience intermittent overload; consider retrying or using an alternative model if needed.
 - **Responsive Premium UI**: Glassmorphism design elements, clean loading animations, and smooth chat history scrolling.
 
 ---
