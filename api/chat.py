@@ -87,7 +87,7 @@ class handler(BaseHTTPRequestHandler):
 
             # 3. Generate Text
             chat_completion = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="openai/gpt-oss-20b",
                 messages=final_messages,
                 temperature=0.0, # Zero temperature for absolute factual rigidity
                 max_tokens=150, 
