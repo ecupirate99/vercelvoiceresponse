@@ -1,6 +1,3 @@
-Here is the updated code. I have added a dropdown menu in the header with 5 popular Edge TTS voices and updated the JavaScript to send the selected voice to your backend.
-
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -47,7 +44,6 @@ body {
   color: #fff;
   font-size: clamp(1.1rem, 2.5vw, 1.4rem);
   font-weight: 600;
-  /* Changed to Flex to accommodate voice selector */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -163,6 +159,50 @@ body {
   border-color: var(--primary);
 }
 
+/* Mic button */
+.mic-button {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  background-color: #fff;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mic-button:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.mic-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+.mic-button.listening {
+  background-color: #ff4d4d;
+  color: #fff;
+  border-color: #ff4d4d;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 77, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0);
+  }
+}
+
 /* Send button */
 .send-button {
   min-width: 48px;
@@ -229,6 +269,15 @@ body {
       placeholder="Type your message…"
       autocomplete="off"
     />
+    <button class="mic-button" id="micButton" aria-label="Voice input">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+        <line x1="12" y1="19" x2="12" y2="23"></line>
+        <line x1="8" y1="23" x2="16" y2="23"></line>
+      </svg>
+    </button>
     <button class="send-button" id="sendButton" aria-label="Send message">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -245,7 +294,55 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendButton = document.getElementById('sendButton');
   const chatMessages = document.getElementById('chatMessages');
   const loading = document.getElementById('loading');
-  const voiceSelect = document.getElementById('voiceSelect'); // Reference to voice selector
+  const voiceSelect = document.getElementById('voiceSelect');
+  const micButton = document.getElementById('micButton');
+
+  let recognition;
+  let isListening = false;
+
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      isListening = true;
+      micButton.classList.add('listening');
+      chatInput.placeholder = 'Listening...';
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      micButton.classList.remove('listening');
+      chatInput.placeholder = 'Type your message…';
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      chatInput.value = transcript;
+      sendMessage();
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error', event.error);
+      isListening = false;
+      micButton.classList.remove('listening');
+      chatInput.placeholder = 'Type your message…';
+    };
+
+    micButton.addEventListener('click', () => {
+      if (isListening) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    });
+  } else {
+    // Hide mic button if speech recognition is not supported in the user's browser
+    micButton.style.display = 'none';
+  }
 
   function sendMessage() {
     const message = chatInput.value.trim();
@@ -307,4 +404,3 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
-```
