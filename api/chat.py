@@ -85,14 +85,36 @@ class handler(BaseHTTPRequestHandler):
             # Ensure we send the full message history if it exists
             final_messages = [system_prompt] + (messages if messages else [{"role": "user", "content": user_msg_content}])
 
-            # 3. Generate Text
-            chat_completion = client.chat.completions.create(
-                model="openai/gpt-oss-20b",
-                messages=final_messages,
-                temperature=0.0, # Zero temperature for absolute factual rigidity
-                max_tokens=150, 
-            )
-            response_text = chat_completion.choices[0].message.content
+            # Ensure GROQ_API_KEY is set
+            if not api_key:
+                error_msg = "GROQ_API_KEY environment variable not set. Please configure it in Vercel environment variables."
+                self.send_error_response(500, error_msg)
+                return
+            try:
+                # 3. Generate Text (primary model)
+                try:
+                    chat_completion = client.chat.completions.create(
+                        model="mixtral-8x7b-32768",
+                        messages=final_messages,
+                        temperature=0.0,
+                        max_tokens=256,
+                    )
+                    response_text = chat_completion.choices[0].message.content
+                except Exception as primary_err:
+                    print(f"Primary model error: {primary_err}")
+                    # Fallback to a lighter free model
+                    fallback_completion = client.chat.completions.create(
+                        model="gemma-2-9b-it",
+                        messages=final_messages,
+                        temperature=0.0,
+                        max_tokens=256,
+                    )
+                    response_text = fallback_completion.choices[0].message.content
+            except Exception as gen_err:
+                # If the model is overloaded or any other error, return a friendly message
+                response_text = "I'm experiencing high load right now. Please try again later."
+                # Log the original error for debugging (stdout)
+                print(f"LLM generation error: {gen_err}")
 
             # 4. Generate Audio
             try:
