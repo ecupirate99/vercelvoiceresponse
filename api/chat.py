@@ -6,7 +6,7 @@ import re
 import edge_tts
 from openai import OpenAI
 from http.server import BaseHTTPRequestHandler
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from datetime import datetime
 
 # HELPER: Async function to generate audio using Edge-TTS
@@ -18,27 +18,24 @@ async def generate_audio(text, voice):
             audio_data += chunk["data"]
     return audio_data
 
-# SEARCH: Logic to get fresh data
+# SEARCH: Logic to get fresh data with strict fallback
 def get_web_results(query):
     print(f"Searching web for: {query}")
     results_text = ""
     try:
         with DDGS() as ddgs:
-            # If asking for weather or news, use the News tab for much fresher data
             if any(word in query.lower() for word in ["weather", "news", "price", "stock"]):
-                print("Using News Search for fresh data...")
-                results = list(ddgs.news(query, max_results=5))
+                results = list(ddgs.news(query, max_results=3))
             else:
-                results = list(ddgs.text(query, max_results=5))
+                results = list(ddgs.text(query, max_results=3))
             
             if results:
                 for r in results:
-                    # News results use 'body', Text results use 'body' or 'snippet'
                     content = r.get('body', r.get('snippet', ''))
                     results_text += f"SOURCE: {r.get('title')}\nINFO: {content}\n\n"
                 return results_text
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"Search error (non-fatal): {e}")
     return None
 
 class handler(BaseHTTPRequestHandler):
@@ -65,13 +62,12 @@ class handler(BaseHTTPRequestHandler):
                 api_key=api_key
             )
 
-            # Current context
             current_date = datetime.now().strftime("%A, %b %d, %Y")
             
             # 1. GET FRESH DATA
             search_context = get_web_results(user_msg_content)
             
-            # 2. STRICT SYSTEM PROMPT (Updated to forbid internal monologue/thinking process)
+            # 2. SYSTEM PROMPT
             system_content = (
                 f"Today is {current_date}. You are a factual assistant. "
                 "You are provided with search results from the last few hours. "
@@ -86,17 +82,15 @@ class handler(BaseHTTPRequestHandler):
                 system_content += f"\n\nFRESH SEARCH RESULTS:\n{search_context}"
 
             system_prompt = {"role": "system", "content": system_content}
-            
-            # Ensure we send the full message history if it exists
             final_messages = [system_prompt] + (messages if messages else [{"role": "user", "content": user_msg_content}])
 
-            # Ensure NVIDIA_API_KEY is set
             if not api_key:
-                error_msg = "NVIDIA_API_KEY environment variable not set. Please configure it in your environment variables."
+                error_msg = "NVIDIA_API_KEY environment variable not set."
                 self.send_error_response(500, error_msg)
                 return
+
             try:
-                # 3. Generate Text (primary model)
+                # 3. Generate Text
                 try:
                     chat_completion = client.chat.completions.create(
                         model="nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -107,7 +101,6 @@ class handler(BaseHTTPRequestHandler):
                     response_text = chat_completion.choices[0].message.content
                 except Exception as primary_err:
                     print(f"Primary model error: {primary_err}")
-                    # Fallback model via OpenAI-compatible interface if needed
                     fallback_completion = client.chat.completions.create(
                         model="meta/llama-3.1-70b-instruct",
                         messages=final_messages,
@@ -116,15 +109,13 @@ class handler(BaseHTTPRequestHandler):
                     )
                     response_text = fallback_completion.choices[0].message.content
                 
-                # SAFETY NET: Clean up any accidental thinking process text leaks
+                # SAFETY NET: Clean up accidental thinking process text
                 if "Here's a thinking process:" in response_text:
                     response_text = re.sub(r"^.*?Here's a thinking process:.*?\n\n", "", response_text, flags=re.DOTALL)
                     response_text = re.sub(r"^.*?\d+\.\s+\*\*.*?\n", "", response_text, flags=re.DOTALL).strip()
 
             except Exception as gen_err:
-                # If the model is overloaded or any other error, return a friendly message
                 response_text = "I'm experiencing high load right now. Please try again later."
-                # Log the original error for debugging (stdout)
                 print(f"LLM generation error: {gen_err}")
 
             # 4. Generate Audio
@@ -152,5 +143,3 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(json.dumps({"error": message}).encode())
-
-```
