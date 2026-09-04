@@ -20,6 +20,11 @@ async def generate_audio(text, voice):
 
 # SEARCH: Logic to get fresh data with strict fallback
 def get_web_results(query):
+    # Skip web search entirely for simple greetings to prevent unnecessary latency and confusion
+    greetings = ["hello", "hi", "hey", "greetings", "good morning", "good afternoon", "good evening"]
+    if query.lower().strip() in greetings:
+        return None
+
     print(f"Searching web for: {query}")
     results_text = ""
     try:
@@ -69,8 +74,9 @@ class handler(BaseHTTPRequestHandler):
             
             # 2. SYSTEM PROMPT
             system_content = (
-                f"Today is {current_date}. You are a factual assistant. "
-                "You are provided with search results from the last few hours. "
+                f"Today is {current_date}. You are a helpful, friendly factual assistant. "
+                "If the user says a simple greeting like 'Hello' or 'Hi', respond with a warm, natural greeting and ask how you can help. "
+                "For other queries, you are provided with search results from the last few hours. "
                 "RULE 1: Only report numbers (like temperature) if they are explicitly in the search results. "
                 "RULE 2: If the results show multiple temperatures, pick the one from the most recent-looking source. "
                 "RULE 3: If you cannot find a specific current temperature, say 'The search results show [General Info] but don't state the exact current temperature.' "
@@ -109,10 +115,24 @@ class handler(BaseHTTPRequestHandler):
                     )
                     response_text = fallback_completion.choices[0].message.content
                 
-                # SAFETY NET: Clean up accidental thinking process text
-                if "Here's a thinking process:" in response_text:
-                    response_text = re.sub(r"^.*?Here's a thinking process:.*?\n\n", "", response_text, flags=re.DOTALL)
-                    response_text = re.sub(r"^.*?\d+\.\s+\*\*.*?\n", "", response_text, flags=re.DOTALL).strip()
+                # SAFETY NET: Clean up any accidental thinking process text leaks completely
+                if "Here's a thinking process:" in response_text or "Check Rules:" in response_text:
+                    # Find where the actual response text starts after the reasoning block
+                    lines = response_text.split('\n')
+                    clean_lines = []
+                    capturing = False
+                    for line in lines:
+                        if "Here's a thinking process:" in line or "Check Rules:" in line or "Evaluate Search" in line or "Apply Rules:" in line:
+                            capturing = False
+                            continue
+                        # If we hit an obvious quote or final statement line or general text, capture it
+                        if line.strip().startswith("-") or line.strip().startswith("1.") or line.strip().startswith("2.") or line.strip().startswith("3.") or line.strip().startswith("4."):
+                            continue
+                        clean_lines.append(line)
+                    
+                    response_text = " ".join([l.strip() for l in clean_lines if l.strip()])
+                    if not response_text:
+                        response_text = "Hello! How can I help you today?"
 
             except Exception as gen_err:
                 response_text = "I'm experiencing high load right now. Please try again later."
