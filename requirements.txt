@@ -1,3 +1,3 @@
 edge-tts
-groq
+openai
 duckduckgo-search
