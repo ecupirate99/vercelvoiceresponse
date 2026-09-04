@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import re
 import edge_tts
 from openai import OpenAI
 from http.server import BaseHTTPRequestHandler
@@ -70,13 +71,14 @@ class handler(BaseHTTPRequestHandler):
             # 1. GET FRESH DATA
             search_context = get_web_results(user_msg_content)
             
-            # 2. STRICT SYSTEM PROMPT
+            # 2. STRICT SYSTEM PROMPT (Updated to forbid internal monologue/thinking process)
             system_content = (
                 f"Today is {current_date}. You are a factual assistant. "
                 "You are provided with search results from the last few hours. "
                 "RULE 1: Only report numbers (like temperature) if they are explicitly in the search results. "
                 "RULE 2: If the results show multiple temperatures, pick the one from the most recent-looking source. "
                 "RULE 3: If you cannot find a specific current temperature, say 'The search results show [General Info] but don't state the exact current temperature.' "
+                "CRITICAL: Do not output any internal monologue, chain-of-thought, or 'thinking process'. Output only your final answer. "
                 "Keep response to 1-2 sentences."
             )
             
@@ -113,6 +115,12 @@ class handler(BaseHTTPRequestHandler):
                         max_tokens=256,
                     )
                     response_text = fallback_completion.choices[0].message.content
+                
+                # SAFETY NET: Clean up any accidental thinking process text leaks
+                if "Here's a thinking process:" in response_text:
+                    response_text = re.sub(r"^.*?Here's a thinking process:.*?\n\n", "", response_text, flags=re.DOTALL)
+                    response_text = re.sub(r"^.*?\d+\.\s+\*\*.*?\n", "", response_text, flags=re.DOTALL).strip()
+
             except Exception as gen_err:
                 # If the model is overloaded or any other error, return a friendly message
                 response_text = "I'm experiencing high load right now. Please try again later."
@@ -144,3 +152,5 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(json.dumps({"error": message}).encode())
+
+```
