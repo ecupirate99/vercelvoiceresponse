@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/**/*.py": {
+      "maxDuration": 30
+    }
+  },
   "routes": [
     {
       "src": "/api/chat",
