@@ -3,7 +3,7 @@ import json
 import base64
 import asyncio
 import edge_tts
-from groq import Groq
+from openai import OpenAI
 from http.server import BaseHTTPRequestHandler
 from duckduckgo_search import DDGS
 from datetime import datetime
@@ -58,8 +58,11 @@ class handler(BaseHTTPRequestHandler):
             messages = request_body.get('messages', [])
             user_msg_content = messages[-1]['content'] if messages else request_body.get('message', "")
 
-            api_key = os.environ.get("GROQ_API_KEY")
-            client = Groq(api_key=api_key)
+            api_key = os.environ.get("NVIDIA_API_KEY")
+            client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=api_key
+            )
 
             # Current context
             current_date = datetime.now().strftime("%A, %b %d, %Y")
@@ -85,16 +88,16 @@ class handler(BaseHTTPRequestHandler):
             # Ensure we send the full message history if it exists
             final_messages = [system_prompt] + (messages if messages else [{"role": "user", "content": user_msg_content}])
 
-            # Ensure GROQ_API_KEY is set
+            # Ensure NVIDIA_API_KEY is set
             if not api_key:
-                error_msg = "GROQ_API_KEY environment variable not set. Please configure it in Vercel environment variables."
+                error_msg = "NVIDIA_API_KEY environment variable not set. Please configure it in your environment variables."
                 self.send_error_response(500, error_msg)
                 return
             try:
                 # 3. Generate Text (primary model)
                 try:
                     chat_completion = client.chat.completions.create(
-                        model="openai/gpt-oss-20b",
+                        model="nvidia/nemotron-3.5-lightning-30b-a3b",
                         messages=final_messages,
                         temperature=0.0,
                         max_tokens=256,
@@ -102,9 +105,9 @@ class handler(BaseHTTPRequestHandler):
                     response_text = chat_completion.choices[0].message.content
                 except Exception as primary_err:
                     print(f"Primary model error: {primary_err}")
-                    # Fallback to a lighter free model
+                    # Fallback model via OpenAI-compatible interface if needed
                     fallback_completion = client.chat.completions.create(
-                        model="gemma-2-9b-it",
+                        model="meta/llama-3.1-70b-instruct",
                         messages=final_messages,
                         temperature=0.0,
                         max_tokens=256,
