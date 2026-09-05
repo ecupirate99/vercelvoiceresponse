@@ -61,9 +61,9 @@ class handler(BaseHTTPRequestHandler):
             messages = request_body.get('messages', [])
             user_msg_content = messages[-1]['content'] if messages else request_body.get('message', "")
 
-            api_key = os.environ.get("NVIDIA_API_KEY")
+            api_key = os.environ.get("OPENROUTER_API_KEY")
             client = OpenAI(
-                base_url="https://integrate.api.nvidia.com/v1",
+                base_url="https://openrouter.ai/api/v1",
                 api_key=api_key
             )
 
@@ -91,48 +91,30 @@ class handler(BaseHTTPRequestHandler):
             final_messages = [system_prompt] + (messages if messages else [{"role": "user", "content": user_msg_content}])
 
             if not api_key:
-                error_msg = "NVIDIA_API_KEY environment variable not set."
+                error_msg = "OPENROUTER_API_KEY environment variable not set."
                 self.send_error_response(500, error_msg)
                 return
 
             try:
-                # 3. Generate Text
-                try:
-                    chat_completion = client.chat.completions.create(
-                        model="nvidia/nemotron-3.5-lightning-30b-a3b",
-                        messages=final_messages,
-                        temperature=0.0,
-                        max_tokens=256,
-                    )
-                    response_text = chat_completion.choices[0].message.content
-                except Exception as primary_err:
-                    print(f"Primary model error: {primary_err}")
-                    fallback_completion = client.chat.completions.create(
-                        model="meta/llama-3.1-70b-instruct",
-                        messages=final_messages,
-                        temperature=0.0,
-                        max_tokens=256,
-                    )
-                    response_text = fallback_completion.choices[0].message.content
-                
-                # SAFETY NET: Clean up any accidental thinking process text leaks completely
-                if "Here's a thinking process:" in response_text or "Check Rules:" in response_text:
-                    # Find where the actual response text starts after the reasoning block
-                    lines = response_text.split('\n')
-                    clean_lines = []
-                    capturing = False
-                    for line in lines:
-                        if "Here's a thinking process:" in line or "Check Rules:" in line or "Evaluate Search" in line or "Apply Rules:" in line:
-                            capturing = False
-                            continue
-                        # If we hit an obvious quote or final statement line or general text, capture it
-                        if line.strip().startswith("-") or line.strip().startswith("1.") or line.strip().startswith("2.") or line.strip().startswith("3.") or line.strip().startswith("4."):
-                            continue
-                        clean_lines.append(line)
-                    
-                    response_text = " ".join([l.strip() for l in clean_lines if l.strip()])
-                    if not response_text:
-                        response_text = "Hello! How can I help you today?"
+                # 3. Generate Text (OpenRouter - MiniMax M2, reasoning disabled)
+                chat_completion = client.chat.completions.create(
+                    model="minimax/minimax-m3:free",
+                    messages=final_messages,
+                    temperature=0.0,
+                    max_tokens=256,
+                    extra_body={
+                        "reasoning": {"enabled": False}
+                    },
+                )
+                response_text = chat_completion.choices[0].message.content or ""
+
+                # SAFETY NET: strip any <think>...</think> reasoning blocks that may leak through
+                response_text = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL).strip()
+                # Also handle an unclosed <think> block (model hit max_tokens mid-thought)
+                if "<think>" in response_text:
+                    response_text = response_text.split("<think>")[0].strip()
+                if not response_text:
+                    response_text = "Hello! How can I help you today?"
 
             except Exception as gen_err:
                 response_text = "I'm experiencing high load right now. Please try again later."
