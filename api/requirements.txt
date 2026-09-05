@@ -1,4 +1,0 @@
-edge-tts
-openai
-httpx
-ddgs
